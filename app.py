@@ -1,6 +1,7 @@
-import streamlit as st
-import pandas as pd
 
+import pandas as pd
+import streamlit as st
+from io import BytesIO
 # ----------------- Master Maps -----------------
 ideal3d_map =  {
     # ---------------- GK Series ----------------
@@ -23,7 +24,8 @@ ideal3d_map =  {
     "Bambu Lab A1 Mini": [
         "RAPID PROTOTYPING MACHINE - AI MINI RAPID PROTOTYPING MACHIN",
         "A1 MINI-EU RAPID PROTOTYPING MACHINE A1 MINI-EU RAPID PROTOTYPING MACHIN",
-        "RAPID PROTOTYPING MACHINE - A1-MINI-EU RAPID PROTOTYPING MACHIN","3D PRINTER - MODEL NO - A1 MINI  EU 3D PRINTER - MODEL NO - A1 MINI  EU",
+        "RAPID PROTOTYPING MACHINE - A1-MINI-EU RAPID PROTOTYPING MACHIN",
+        "3D PRINTER - MODEL NO - A1 MINI  EU 3D PRINTER - MODEL NO - A1 MINI  EU",
     ],
     "Bambu Lab A1 Combo": [
         "RAPID PROTOTYPING MACHINE - A1-COMBO1-EU RAPID PROTOTYPING MACHIN",
@@ -256,7 +258,7 @@ wol3d_map = {
     ]
 }
 
-# ----------------- Helper: Reverse map -----------------
+#----------------- Helper: Reverse map -----------------
 def build_reverse_map(product_map):
     reverse_map = {}
     for canonical, variants in product_map.items():
@@ -303,14 +305,19 @@ if uploaded_file:
             lambda x: map_to_master_exact(x, reverse_map)
         )
 
+        # Ensure Date column is datetime (for unique counts)
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+
         # === Grouped summary report ===
         report = (
             df.groupby("Product Master")
-            .agg({
-                "Quantity": "sum",
-                "Date": lambda x: ", ".join(sorted(x.astype(str).unique())),
-                "Shipper": lambda x: ", ".join(sorted(x.astype(str).unique()))
-            })
+            .agg(
+                Quantity=("Quantity", "sum"),
+                Shipment_Dates=("Date", lambda x: ", ".join(sorted(x.dropna().astype(str).unique()))),
+                Shippers=("Shipper", lambda x: ", ".join(sorted(x.dropna().astype(str).unique()))),
+                Number_of_Shipments=("Date", "nunique"),
+                Number_of_Shippers=("Shipper", "nunique"),
+            )
             .reset_index()
         )
 
@@ -339,16 +346,22 @@ if uploaded_file:
         st.dataframe(df, use_container_width=True)
 
         # --- Download buttons ---
+        def to_excel_bytes(df):
+            buffer = BytesIO()
+            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                df.to_excel(writer, index=False)
+            return buffer.getvalue()
+
         st.download_button(
             label="📥 Download Grouped Report (Excel)",
-            data=report.to_excel(index=False, engine="openpyxl"),
+            data=to_excel_bytes(report),
             file_name=f"{company}_grouped_report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
         st.download_button(
             label="📥 Download Raw Data (Excel)",
-            data=df.to_excel(index=False, engine="openpyxl"),
+            data=to_excel_bytes(df),
             file_name=f"{company}_raw_data.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
